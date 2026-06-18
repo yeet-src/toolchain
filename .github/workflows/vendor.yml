@@ -103,6 +103,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Collect clang binaries
         uses: actions/download-artifact@v4
@@ -130,6 +133,23 @@ jobs:
           # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
           tar -czf libbpf-headers.tar.gz -C include bpf
 
+      - name: Compute next toolchain version
+        run: |
+          set -euo pipefail
+          # Highest existing vX.Y tag + 0.1 (tenths to avoid float drift);
+          # first publish is v0.1. Each publish is an immutable release.
+          latest="$(git tag -l 'v[0-9]*.[0-9]*' | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n | tail -1)"
+          if [ -z "$latest" ]; then
+            next="0.1"
+          else
+            tenths=$(( $(echo "$latest" | awk -F. '{print $1*10 + $2}') + 1 ))
+            next="$(( tenths / 10 )).$(( tenths % 10 ))"
+          fi
+          echo "TC=$next" >> "$GITHUB_ENV"
+          sed -i "s|^TOOLCHAIN_VERSION=.*|TOOLCHAIN_VERSION=${next}|" build/versions.env
+          echo "next toolchain version: v${next}"
+
       - name: Record checksums in versions.env
         run: |
           set -euo pipefail
@@ -146,42 +166,24 @@ jobs:
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
-      - name: Publish version-addressed toolchain assets
+      - name: Publish v${{ env.TC }} release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          . build/versions.env
-          # A consumer's cache fetches from a stable "toolchain" release; asset
-          # names carry the version so a bump adds new assets beside the old
-          # ones instead of replacing them.
-          gh release view toolchain >/dev/null 2>&1 \
-            || gh release create toolchain --title "toolchain" \
-                 --notes "Version-addressed static build toolchain assets."
-          cp x86_64/clang    "clang-x86_64-llvm${LLVM_VERSION}"
-          cp aarch64/clang   "clang-aarch64-llvm${LLVM_VERSION}"
-          cp x86_64/make     "make-x86_64-${MAKE_VERSION}"
-          cp aarch64/make    "make-aarch64-${MAKE_VERSION}"
-          cp x86_64/bpftool  "bpftool-x86_64-v${BPFTOOL_VERSION}"
-          cp aarch64/bpftool "bpftool-aarch64-v${BPFTOOL_VERSION}"
-          cp x86_64/esbuild  "esbuild-x86_64-${ESBUILD_VERSION}"
-          cp aarch64/esbuild "esbuild-aarch64-${ESBUILD_VERSION}"
-          cp x86_64/git      "git-x86_64-v${GIT_VERSION}"
-          cp aarch64/git     "git-aarch64-v${GIT_VERSION}"
-          cp libbpf-headers.tar.gz "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz"
-          # --clobber so re-running for the same version refreshes the asset.
-          gh release upload toolchain \
-            "clang-x86_64-llvm${LLVM_VERSION}" \
-            "clang-aarch64-llvm${LLVM_VERSION}" \
-            "make-x86_64-${MAKE_VERSION}" \
-            "make-aarch64-${MAKE_VERSION}" \
-            "bpftool-x86_64-v${BPFTOOL_VERSION}" \
-            "bpftool-aarch64-v${BPFTOOL_VERSION}" \
-            "esbuild-x86_64-${ESBUILD_VERSION}" \
-            "esbuild-aarch64-${ESBUILD_VERSION}" \
-            "git-x86_64-v${GIT_VERSION}" \
-            "git-aarch64-v${GIT_VERSION}" \
-            "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz" --clobber
+          tag="v${TC}"
+          # Immutable, version-tagged release; the tag carries the version, so
+          # assets are plain-named (<tool>-<arch>). Consumers pin this one tag.
+          mkdir -p dist
+          for a in x86_64 aarch64; do
+            for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+          done
+          cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --title "$tag" \
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
+          # --clobber so a same-version re-run refreshes assets.
+          gh release upload "$tag" dist/* --clobber
 
       - name: Commit headers + recorded checksums
         run: |
@@ -196,7 +198,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "no changes to commit"
           else
-            . build/versions.env
-            git commit -m "toolchain: record checksums + headers for clang ${LLVM_VERSION}, bpftool ${BPFTOOL_VERSION}, esbuild ${ESBUILD_VERSION}, git ${GIT_VERSION}"
+            git commit -m "toolchain v${TC}: record version, checksums + headers"
             git push
           fi

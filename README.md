@@ -8,8 +8,9 @@ into a shared per-machine cache.
 ## What it ships
 
 Each tool is a fully-static binary (no shared-library deps), built or fetched
-per arch (`x86_64`, `aarch64`) and published as a version-addressed asset on
-the rolling **`toolchain`** release.
+per arch (`x86_64`, `aarch64`) and published on an immutable, version-tagged
+release **`v0.1`, `v0.2`, …**. The tag carries the version, so the assets are
+plain-named (`clang-x86_64`, `make-aarch64`, …); a consumer pins one version.
 
 | tool      | for                                                | source |
 |-----------|----------------------------------------------------|--------|
@@ -42,11 +43,13 @@ from this repo's release, checksum-verified. Pull updates with
 
 ## Releasing
 
-Bump a version in [`build/versions.env`](build/versions.env) and push — the
+Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
 git on native x86_64 and arm64 runners, re-hosts bpftool/esbuild/headers,
-publishes all assets to the `toolchain` release, and records the checksums back
-into `versions.env`.
+**computes the next `vX.Y`** (highest existing + 0.1), publishes all assets to
+that immutable release, and records the version + checksums into `versions.env`.
+The version bumps only when this repo changes, so consumers re-fetch only on a
+real toolchain change.
 
 Build a single tool locally:
 
