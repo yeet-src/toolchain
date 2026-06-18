@@ -67,6 +67,21 @@ fetch_bin bpftool
 fetch_bin esbuild
 fetch_bin git
 
+# tsgo (native TypeScript compiler): a Go binary that resolves its bundled
+# standard library (lib.*.d.ts) relative to itself, so it ships as a per-arch
+# tarball extracted into $DIR/tsgo/ (binary + libs together), not a flat binary.
+if want tsgo && [ ! -x "$DIR/tsgo/tsgo" ]; then
+	echo ">> fetch tsgo (${ARCH}, v${TOOLCHAIN_VERSION})"
+	td="$(mktemp -d)"
+	curl -fSL --retry 3 -o "$td/tsgo.tgz" "${REL}/tsgo-${ARCH}.tar.gz"
+	verify "$td/tsgo.tgz" "$(get_sha TSGO)" "tsgo" || { rm -rf "$td"; exit 1; }
+	rm -rf "$DIR/tsgo"
+	mkdir -p "$DIR/tsgo"
+	tar xzf "$td/tsgo.tgz" -C "$DIR/tsgo"   # tarball root holds tsgo + lib.*.d.ts
+	chmod +x "$DIR/tsgo/tsgo"
+	rm -rf "$td"
+fi
+
 # libbpf program headers: arch-independent, one copy per version, beside the
 # per-arch tool dirs ($key/include/bpf/*.h).
 INC="$(dirname "$DIR")/include"

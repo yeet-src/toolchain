@@ -24,6 +24,7 @@ plain-named (`clang-x86_64`, `make-aarch64`, …); a consumer pins one version.
 | `git`     | `git init` a generated project                     | built from git source, musl-static, lean (no https) |
 | `bpftool` | `vmlinux.h` (BTF dump) + link BPF objects          | official static release, re-hosted |
 | `esbuild` | bundle the JS entry                                | official static (Go) binary, re-hosted |
+| `tsgo`    | type-check TS (native compiler; esbuild only strips) | official static (Go) binary + its `lib.*.d.ts`, re-hosted as a per-arch tarball |
 | `bpf/*.h` | libbpf program headers (`<bpf/bpf_helpers.h>`, …)  | libbpf bundled with bpftool |
 
 ```
@@ -60,5 +61,5 @@ Build a single tool locally:
 
 ```sh
 build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh
-build/fetch-bpftool.sh            # prebuilt; also fetch-esbuild.sh / fetch-libbpf-headers.sh
+build/fetch-bpftool.sh            # prebuilt; also fetch-esbuild.sh / fetch-tsgo.sh / fetch-libbpf-headers.sh
 ```

@@ -123,15 +123,22 @@ jobs:
           install -Dm755 artifacts/git-aarch64/git     aarch64/git
           sh build/fetch-bpftool.sh
           sh build/fetch-esbuild.sh
+          sh build/fetch-tsgo.sh
           sh build/fetch-libbpf-headers.sh
           ls -la x86_64 aarch64 include/bpf
-          file x86_64/* aarch64/* || true
+          for a in x86_64 aarch64; do file "$a"/clang "$a"/make "$a"/bpftool "$a"/esbuild "$a"/git "$a"/tsgo/tsgo; done || true
 
-      - name: Build libbpf-headers tarball
+      - name: Build header + tsgo tarballs
         run: |
           set -euo pipefail
           # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
           tar -czf libbpf-headers.tar.gz -C include bpf
+          # tsgo is the binary + its bundled lib.*.d.ts; pack each arch so the
+          # consumer extracts the pair together (tsgo locates its libs beside
+          # the executable). Tarball root holds tsgo + lib.*.d.ts.
+          for a in x86_64 aarch64; do
+            tar -czf "tsgo-${a}.tar.gz" -C "$a/tsgo" .
+          done
 
       - name: Compute next toolchain version
         run: |
@@ -164,6 +171,12 @@ jobs:
           done
           hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
+          # tsgo is published as a per-arch tarball, not a flat binary, so its
+          # checksum is recorded from the tarball (consumers verify that).
+          for arch in x86_64 aarch64; do
+            s="$(sha256sum "tsgo-${arch}.tar.gz" | awk '{print $1}')"
+            sed -i "s|^TSGO_SHA256_${arch}=.*|TSGO_SHA256_${arch}=${s}|" build/versions.env
+          done
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
       - name: Tag immutable v${{ env.TC }} snapshot
@@ -199,10 +212,12 @@ jobs:
           mkdir -p dist
           for a in x86_64 aarch64; do
             for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+            # tsgo rides as a per-arch tarball (binary + its lib.*.d.ts).
+            cp "tsgo-${a}.tar.gz" "dist/tsgo-${a}.tar.gz"
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/tsgo/libbpf headers re-hosted."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
