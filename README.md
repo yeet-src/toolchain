@@ -1,5 +1,10 @@
 # toolchain
 
+<p align="center">
+  <img src="docs/st-ignucius.jpg" alt="St. IGNUcius blesses your static build" width="320"><br>
+  <em>St. IGNUcius blesses your statically-linked build.</em>
+</p>
+
 Static, version-pinned build tools for yeet scripts, so a project's `make`
 runs with **no system C/BPF toolchain** installed. This repo *produces and
 publishes* the toolchain; consumers (e.g. `script-template`) fetch it on demand
