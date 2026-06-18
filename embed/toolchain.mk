@@ -1,4 +1,4 @@
-# Resolve the static build toolchain (clang, bpftool, esbuild, git, tsgo) — included
+# Resolve the static build toolchain (clang, bpftool, esbuild, git) — included
 # by the project Makefile before build/bpf.mk, so the tools are set before any
 # rule uses them. A `make CLANG=…` CLI override beats this.
 #
@@ -22,9 +22,6 @@ ifneq ($(TOOLCHAIN_LOCK),)
   BPFTOOL ?= $(TOOLCHAIN_DIR)/bpftool
   ESBUILD ?= $(TOOLCHAIN_DIR)/esbuild
   GIT     ?= $(TOOLCHAIN_DIR)/git
-  # tsgo ships as a dir (binary + its bundled lib.*.d.ts) — the executable
-  # resolves its standard library beside itself, so it can't be a flat path.
-  TSGO    ?= $(TOOLCHAIN_DIR)/tsgo/tsgo
   # libbpf program headers are arch-independent: one copy per version key,
   # beside the per-arch tool dirs.
   BPF_SYSINCLUDE ?= $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/include
@@ -33,7 +30,6 @@ endif
 # PATH fallbacks (bpf.mk supplies the clang/bpftool fallbacks).
 ESBUILD ?= esbuild
 GIT     ?= git
-TSGO    ?= tsgo
 
 # Fill the cache for this arch, downloading any missing tool once. A no-op
 # when no lock is present (PATH case).
