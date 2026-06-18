@@ -1,11 +1,13 @@
 name: vendor-toolchain
 
-# Build the vendored static BPF toolchain (clang + bpftool) for both arches
-# clang is compiled from LLVM source on a NATIVE
-# runner per arch — no QEMU emulation — so the multi-hour x86_64 build that
-# is impractical on an arm64 laptop runs here in normal CI time.
+# Build and publish the static toolchain for x86_64 and aarch64: clang, make
+# and git are compiled from source on NATIVE runners per arch (no QEMU — the
+# multi-hour x86_64 LLVM build runs here in normal CI time), while bpftool,
+# esbuild and the libbpf headers are re-hosted from upstream. All are published
+# as version-addressed assets on the `toolchain` release, with checksums
+# recorded back into build/versions.env.
 #
-# Run manually from the Actions tab, or when the build recipe changes.
+# Run manually from the Actions tab, or by changing the build recipe.
 
 on:
   workflow_dispatch:
@@ -185,9 +187,9 @@ jobs:
         run: |
           set -euo pipefail
           # Binaries are NOT committed — they are published as release assets
-          # above and fetched into the per-machine cache. Only the small SDK
-          # Binaries are gitignored; only headers + recorded checksums are committed (x86_64/ aarch64/
-          gitignored).
+          # above and fetched into the per-machine cache. Only the SDK headers
+          # and the recorded checksums land in git (x86_64/ and aarch64/ are
+          # gitignored).
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add include build/versions.env
@@ -195,6 +197,6 @@ jobs:
             echo "no changes to commit"
           else
             . build/versions.env
-            git commit -m "v: publish static clang ${LLVM_VERSION} + bpftool ${BPFTOOL_VERSION} + esbuild ${ESBUILD_VERSION} + libbpf headers (x86_64, aarch64)"
+            git commit -m "toolchain: record checksums + headers for clang ${LLVM_VERSION}, bpftool ${BPFTOOL_VERSION}, esbuild ${ESBUILD_VERSION}, git ${GIT_VERSION}"
             git push
           fi
