@@ -24,21 +24,21 @@ the rolling **`toolchain`** release.
 build/      reproducible recipe — Dockerfile.{clang,make,git}, build-*.sh,
             fetch-*.sh, versions.env (pins + checksums)
 include/    arch-independent libbpf SDK headers (source for the headers tarball)
-consumer/   the glue a template needs: toolchain.mk + fetch-toolchain.sh
+embed/      the glue a template carries: toolchain.mk + fetch-toolchain.sh
 .github/    vendor.yml — builds on native runners and publishes the release
 ```
 
 Built binaries (`x86_64/`, `aarch64/`) are **not committed** — they're the
-release assets. Only the recipe, headers, and consumer glue are tracked.
+release assets. Only the recipe, headers, and embed glue are tracked.
 
 ## Consuming it
 
-A template carries the [`consumer/`](consumer/) glue plus a `toolchain.lock`
+A template carries the [`embed/`](embed/) glue plus a `toolchain.lock`
 (a copy of [`build/versions.env`](build/versions.env): pins + checksums +
 `TOOLCHAIN_BASE_URL`). The project's `build/toolchain.mk` resolves each tool
 from the cache, and `build/fetch-toolchain.sh` downloads any missing one (once)
 from this repo's release, checksum-verified. Pull updates with
-`git subtree pull` (or copy `consumer/` + `build/versions.env`).
+`git subtree pull` (or copy `embed/` + `build/versions.env`).
 
 ## Releasing
 
