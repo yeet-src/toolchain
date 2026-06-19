@@ -97,153 +97,83 @@ jobs:
 
   build:
     needs: detect
+    # One job per (tool, arch) so every tool builds on its own runner in
+    # parallel — the multi-hour clang build no longer blocks make/git/qemu, and
+    # each job is labelled for the tool it actually builds (e.g. "clang
+    # (x86_64)"). Wall-clock collapses from clang+make+git+qemu to ~max(tool).
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: amd64
-            arch: x86_64
-            runner: ubuntu-latest
-          - platform: arm64
-            arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+        tool: [clang, make, git, qemu]
+        arch:
+          - { platform: amd64, name: x86_64, runner: ubuntu-latest }
+          - { platform: arm64, name: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.arch.runner }}
+    name: ${{ matrix.tool }} (${{ matrix.arch.name }})
     env:
       GH_TOKEN: ${{ github.token }}
+      TOOL: ${{ matrix.tool }}
+      ARCH: ${{ matrix.arch.name }}
     steps:
       - uses: actions/checkout@v4
 
-      # clang -----------------------------------------------------------------
-      - name: Build static clang (${{ matrix.arch }})
-        if: needs.detect.outputs.clang == 'true'
+      - name: Build ${{ matrix.tool }} from source (${{ matrix.arch.name }})
+        if: needs.detect.outputs[matrix.tool] == 'true'
         run: |
           set -euo pipefail
           . build/versions.env
+          # Per-tool build-args. clang/make/git export a single static binary at
+          # out/<tool>; qemu exports a tree (out/bin + out/share/qemu) — a static
+          # qemu-system for the optional kernel-matrix runner, trimmed by its
+          # Dockerfile to the binary + the firmware blobs lvh's machine loads.
+          case "$TOOL" in
+            clang) args=(-f build/Dockerfile.clang
+                     --build-arg "LLVM_VERSION=${LLVM_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}"
+                     --build-arg "COMPILE_JOBS=$(nproc)") ;;
+            make)  args=(-f build/Dockerfile.make
+                     --build-arg "MAKE_VERSION=${MAKE_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+            git)   args=(-f build/Dockerfile.git
+                     --build-arg "GIT_VERSION=${GIT_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+            qemu)  args=(-f build/Dockerfile.qemu
+                     --build-arg "QEMU_VERSION=${QEMU_VERSION}"
+                     --build-arg "QEMU_TARGET=${ARCH}-softmmu"
+                     --build-arg "LIBSLIRP_VERSION=${LIBSLIRP_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+          esac
           docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.clang \
-            --build-arg "LLVM_VERSION=${LLVM_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --build-arg "COMPILE_JOBS=$(nproc)" \
+            --platform "linux/${{ matrix.arch.platform }}" \
+            "${args[@]}" \
             --target export \
             --output "type=local,dest=out" \
             build
 
-      - name: Reuse clang from ${{ needs.detect.outputs.prevtag }}
-        if: needs.detect.outputs.clang != 'true'
+      - name: Reuse ${{ matrix.tool }} from ${{ needs.detect.outputs.prevtag }}
+        if: needs.detect.outputs[matrix.tool] != 'true'
         run: |
           set -euo pipefail
           mkdir -p out
-          gh release download "${{ needs.detect.outputs.prevtag }}" \
-            --repo "$GITHUB_REPOSITORY" -p "clang-${{ matrix.arch }}" -O out/clang
-          chmod +x out/clang
+          if [ "$TOOL" = qemu ]; then
+            # qemu rides the release as a per-arch tarball (binary + blobs);
+            # unpack it back into the bin/ + share/qemu/ tree the build emits.
+            gh release download "${{ needs.detect.outputs.prevtag }}" \
+              --repo "$GITHUB_REPOSITORY" -p "qemu-${ARCH}.tar.gz" -O qemu.tar.gz
+            tar -xzf qemu.tar.gz -C out
+          else
+            gh release download "${{ needs.detect.outputs.prevtag }}" \
+              --repo "$GITHUB_REPOSITORY" -p "${TOOL}-${ARCH}" -O "out/${TOOL}"
+            chmod +x "out/${TOOL}"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: clang-${{ matrix.arch }}
-          path: out/clang
-          if-no-files-found: error
-
-      # make ------------------------------------------------------------------
-      - name: Build static make (${{ matrix.arch }})
-        if: needs.detect.outputs.make == 'true'
-        run: |
-          set -euo pipefail
-          . build/versions.env
-          docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.make \
-            --build-arg "MAKE_VERSION=${MAKE_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --target export \
-            --output "type=local,dest=outmake" \
-            build
-
-      - name: Reuse make from ${{ needs.detect.outputs.prevtag }}
-        if: needs.detect.outputs.make != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p outmake
-          gh release download "${{ needs.detect.outputs.prevtag }}" \
-            --repo "$GITHUB_REPOSITORY" -p "make-${{ matrix.arch }}" -O outmake/make
-          chmod +x outmake/make
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: make-${{ matrix.arch }}
-          path: outmake/make
-          if-no-files-found: error
-
-      # git -------------------------------------------------------------------
-      - name: Build static git (${{ matrix.arch }})
-        if: needs.detect.outputs.git == 'true'
-        run: |
-          set -euo pipefail
-          . build/versions.env
-          docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.git \
-            --build-arg "GIT_VERSION=${GIT_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --target export \
-            --output "type=local,dest=outgit" \
-            build
-
-      - name: Reuse git from ${{ needs.detect.outputs.prevtag }}
-        if: needs.detect.outputs.git != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p outgit
-          gh release download "${{ needs.detect.outputs.prevtag }}" \
-            --repo "$GITHUB_REPOSITORY" -p "git-${{ matrix.arch }}" -O outgit/git
-          chmod +x outgit/git
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: git-${{ matrix.arch }}
-          path: outgit/git
-          if-no-files-found: error
-
-      # qemu ------------------------------------------------------------------
-      - name: Build static qemu (${{ matrix.arch }})
-        if: needs.detect.outputs.qemu == 'true'
-        run: |
-          set -euo pipefail
-          . build/versions.env
-          case "${{ matrix.arch }}" in
-            x86_64)  target=x86_64-softmmu  ;;
-            aarch64) target=aarch64-softmmu ;;
-          esac
-          # Not part of the build toolchain — a static qemu-system for the
-          # optional kernel-matrix test runner. The Dockerfile trims it to the
-          # binary + the few firmware blobs lvh's machine loads, and self-checks
-          # that set boots. Built here on the native runner like clang/make/git.
-          docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.qemu \
-            --build-arg "QEMU_VERSION=${QEMU_VERSION}" \
-            --build-arg "QEMU_TARGET=${target}" \
-            --build-arg "LIBSLIRP_VERSION=${LIBSLIRP_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --target export \
-            --output "type=local,dest=outqemu" \
-            build
-
-      - name: Reuse qemu from ${{ needs.detect.outputs.prevtag }}
-        if: needs.detect.outputs.qemu != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p outqemu
-          gh release download "${{ needs.detect.outputs.prevtag }}" \
-            --repo "$GITHUB_REPOSITORY" -p "qemu-${{ matrix.arch }}.tar.gz" -O qemu.tar.gz
-          # Unpack back into the tree layout the build emits (bin/ + share/qemu/).
-          tar -xzf qemu.tar.gz -C outqemu
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: qemu-${{ matrix.arch }}
-          # The whole tree: bin/qemu-system-<arch> + share/qemu/<blobs>.
-          path: outqemu
+          # Single binary for clang/make/git; the bin/+share tree for qemu.
+          # download-artifact restores this as artifacts/<tool>-<arch>/...,
+          # which is exactly what the vendor job assembles from.
+          name: ${{ matrix.tool }}-${{ matrix.arch.name }}
+          path: out
           if-no-files-found: error
 
   vendor:
