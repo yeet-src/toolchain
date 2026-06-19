@@ -72,6 +72,14 @@ that immutable release, and records the version + checksums into `versions.env`.
 The version bumps only when this repo changes, so consumers re-fetch only on a
 real toolchain change.
 
+To avoid burning an hour rebuilding clang on every push, the workflow only
+rebuilds a from-source tool when its inputs changed: a `detect` step
+fingerprints each tool's Dockerfile plus the version vars it consumes against
+the previous release, and reuses that release's binary for anything unchanged
+(so editing only `Dockerfile.git` rebuilds just git). To force a full
+from-source rebuild, run the workflow manually from the Actions tab with the
+**`rebuild_all`** box ticked.
+
 Build a single tool locally:
 
 ```sh
