@@ -84,10 +84,23 @@ jobs:
           read_src() {  # ref path
             if [ "$1" = WORK ]; then cat "$2"; else git show "$1:$2" 2>/dev/null || true; fi
           }
+          # Normalise a Dockerfile for fingerprinting: drop blank lines and
+          # full-line comments (in a Dockerfile only a line-leading '#' is a
+          # comment; inline '#' is part of the instruction) so doc-only edits
+          # don't force a rebuild. Parser directives (# syntax=, # escape=) are
+          # build-significant, so keep them.
+          norm_df() {
+            awk '{ low = tolower($0) }
+                 low ~ /^[[:space:]]*#[[:space:]]*(syntax|escape)=/ { print; next }
+                 /^[[:space:]]*#/                                   { next }
+                 /^[[:space:]]*$/                                   { next }
+                 { print }'
+          }
           # Fingerprint a from-source tool's build inputs: exactly what the Docker
-          # build consumes — its Dockerfile plus the version vars passed as
-          # build-args. We hash only those keys (not the whole versions.env), so
-          # CI's own checksum/version edits never masquerade as a real change.
+          # build consumes — its Dockerfile (sans comments/blanks) plus the
+          # version vars passed as build-args. We hash only those keys (not the
+          # whole versions.env), so CI's own checksum/version edits never
+          # masquerade as a real change.
           fingerprint() {  # ref tool
             case "$2" in
               clang) df=build/Dockerfile.clang; keys="LLVM_VERSION ALPINE_TAG" ;;
@@ -96,7 +109,7 @@ jobs:
               qemu)  df=build/Dockerfile.qemu;  keys="QEMU_VERSION LIBSLIRP_VERSION ALPINE_TAG" ;;
             esac
             env="$(read_src "$1" build/versions.env)"
-            { read_src "$1" "$df"
+            { read_src "$1" "$df" | norm_df
               for k in $keys; do printf '%s\n' "$env" | grep "^$k=" || true; done
             } | sha256sum | awk '{print $1}'
           }
