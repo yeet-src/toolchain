@@ -27,11 +27,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Scan the PR title (squash merges default the commit subject from it)
-          # plus every commit message in the PR. The namespaced [bump:...] form
-          # never collides with ordinary bracket text ([skip ci], markdown
-          # links, …), so unknown levels are unambiguously typos.
-          commits="$(git log --format=%B "${BASE_SHA}..${HEAD_SHA}" 2>/dev/null || true)"
+          # Scan the PR title plus each commit's SUBJECT line (not the body) —
+          # the marker lives in the subject, like [skip ci], so prose in a body
+          # that merely documents the markers never trips the check. The
+          # namespaced bump:<level> form also won't collide with ordinary
+          # bracket text ([skip ci], markdown links, …).
+          commits="$(git log --format=%s "${BASE_SHA}..${HEAD_SHA}" 2>/dev/null || true)"
           text="$PR_TITLE
           $commits"
 
