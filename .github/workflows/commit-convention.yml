@@ -37,9 +37,11 @@ jobs:
 
           fail=false
 
-          # Any [bump:LEVEL] whose level isn't patch|minor|major is malformed.
+          # A candidate marker is a single token [bump:<word>]. Prose/notation
+          # like [bump:patch|minor|major] or [bump:*] (pipes, stars, spaces)
+          # isn't a marker attempt — only a malformed SINGLE level is a typo.
           bad="$(printf '%s' "$text" \
-            | grep -oiE '\[bump:[^]]*\]' \
+            | grep -oiE '\[bump:[a-z0-9.]+\]' \
             | grep -viE '\[bump:(patch|minor|major)\]' || true)"
           if [ -n "$bad" ]; then
             echo "::error::Unrecognised bump marker(s): $(printf '%s' "$bad" | tr '\n' ' ')"
