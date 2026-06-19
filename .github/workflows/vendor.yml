@@ -98,6 +98,36 @@ jobs:
           path: outgit/git
           if-no-files-found: error
 
+      - name: Build static qemu (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . build/versions.env
+          case "${{ matrix.arch }}" in
+            x86_64)  target=x86_64-softmmu  ;;
+            aarch64) target=aarch64-softmmu ;;
+          esac
+          # Not part of the build toolchain — a static qemu-system for the
+          # optional kernel-matrix test runner. The Dockerfile trims it to the
+          # binary + the few firmware blobs lvh's machine loads, and self-checks
+          # that set boots. Built here on the native runner like clang/make/git.
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f build/Dockerfile.qemu \
+            --build-arg "QEMU_VERSION=${QEMU_VERSION}" \
+            --build-arg "QEMU_TARGET=${target}" \
+            --build-arg "LIBSLIRP_VERSION=${LIBSLIRP_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --target export \
+            --output "type=local,dest=outqemu" \
+            build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qemu-${{ matrix.arch }}
+          # The whole tree: bin/qemu-system-<arch> + share/qemu/<blobs>.
+          path: outqemu
+          if-no-files-found: error
+
   vendor:
     needs: clang
     runs-on: ubuntu-latest
@@ -134,6 +164,18 @@ jobs:
           # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
           tar -czf libbpf-headers.tar.gz -C include bpf
 
+      - name: Build qemu tarballs
+        run: |
+          set -euo pipefail
+          # Pack each arch's qemu tree (bin/ + share/qemu/) so the matrix runner
+          # extracts it as <dest>/bin/qemu-system-<arch> with its blobs beside it
+          # (qemu finds its datadir relative to the binary). upload-artifact drops
+          # the exec bit, so restore it before tarring.
+          for a in x86_64 aarch64; do
+            chmod +x "artifacts/qemu-$a/bin/qemu-system-$a"
+            tar -czf "qemu-$a.tar.gz" -C "artifacts/qemu-$a" .
+          done
+
       - name: Compute next toolchain version
         run: |
           set -euo pipefail
@@ -165,6 +207,11 @@ jobs:
           done
           hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
+          # qemu ships as a per-arch tarball (binary + blobs), so checksum the tarball.
+          for arch in x86_64 aarch64; do
+            qs="$(sha256sum "qemu-$arch.tar.gz" | awk '{print $1}')"
+            sed -i "s|^QEMU_SHA256_${arch}=.*|QEMU_SHA256_${arch}=${qs}|" build/versions.env
+          done
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
       - name: Tag immutable v${{ env.TC }} snapshot
@@ -202,8 +249,10 @@ jobs:
             for t in clang make bpftool veristat esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
+          # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
+          for a in x86_64 aarch64; do cp "qemu-$a.tar.gz" "dist/qemu-$a.tar.gz"; done
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
