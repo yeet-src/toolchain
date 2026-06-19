@@ -122,6 +122,7 @@ jobs:
           install -Dm755 artifacts/git-x86_64/git      x86_64/git
           install -Dm755 artifacts/git-aarch64/git     aarch64/git
           sh build/fetch-bpftool.sh
+          sh build/fetch-veristat.sh
           sh build/fetch-esbuild.sh
           sh build/fetch-libbpf-headers.sh
           ls -la x86_64 aarch64 include/bpf
@@ -156,7 +157,7 @@ jobs:
           # Record the checksum of every binary we publish, so a consumer
           # verifies the exact artifact it downloads from our release.
           for arch in x86_64 aarch64; do
-            for tool in clang make bpftool esbuild git; do
+            for tool in clang make bpftool veristat esbuild git; do
               s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
               key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
               sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
@@ -198,7 +199,7 @@ jobs:
           # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
-            for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+            for t in clang make bpftool veristat esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
           gh release view "$tag" >/dev/null 2>&1 \

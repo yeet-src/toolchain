@@ -23,6 +23,7 @@ plain-named (`clang-x86_64`, `make-aarch64`, …); a consumer pins one version.
 | `make`    | drive the build                                    | built from GNU make source, musl-static |
 | `git`     | `git init` a generated project                     | built from git source, musl-static, lean (no https) |
 | `bpftool` | `vmlinux.h` (BTF dump) + link BPF objects          | official static release, re-hosted |
+| `veristat`| check `*.bpf.o` load + BPF verifier statistics     | official static release, re-hosted |
 | `esbuild` | bundle the JS entry                                | official static (Go) binary, re-hosted |
 | `bpf/*.h` | libbpf program headers (`<bpf/bpf_helpers.h>`, …)  | libbpf bundled with bpftool |
 
@@ -50,7 +51,7 @@ from this repo's release, checksum-verified. Pull updates with
 
 Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
-git on native x86_64 and arm64 runners, re-hosts bpftool/esbuild/headers,
+git on native x86_64 and arm64 runners, re-hosts bpftool/veristat/esbuild/headers,
 **computes the next `vX.Y`** (highest existing + 0.1), publishes all assets to
 that immutable release, and records the version + checksums into `versions.env`.
 The version bumps only when this repo changes, so consumers re-fetch only on a
@@ -60,5 +61,5 @@ Build a single tool locally:
 
 ```sh
 build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh
-build/fetch-bpftool.sh            # prebuilt; also fetch-esbuild.sh / fetch-libbpf-headers.sh
+build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-esbuild.sh / fetch-libbpf-headers.sh
 ```
