@@ -13,9 +13,23 @@ into a shared per-machine cache.
 ## What it ships
 
 Each tool is a fully-static binary (no shared-library deps), built or fetched
-per arch (`x86_64`, `aarch64`) and published on an immutable, version-tagged
-release **`v0.1`, `v0.2`, …**. The tag carries the version, so the assets are
-plain-named (`clang-x86_64`, `make-aarch64`, …); a consumer pins one version.
+per arch (`x86_64`, `aarch64`) and published on an immutable, semver-tagged
+release **`vMAJOR.MINOR.PATCH`** (`v0.6.0`, `v0.6.1`, …). The tag carries the
+version, so the assets are plain-named (`clang-x86_64`, `make-aarch64`, …); a
+consumer pins one version.
+
+CI picks the bump from the commit messages since the last release, via a
+`[bump:LEVEL]` marker anywhere in the message:
+
+| Marker | Bump | Notes |
+| --- | --- | --- |
+| *(none)* or `[bump:minor]` | **minor** `X.Y+1.0` | the default — a normal push |
+| `[bump:patch]` | **patch** `X.Y.Z+1` | only if **every** commit in the release range is `[bump:patch]` |
+| `[bump:major]` | **major** `X+1.0.0` | one such commit makes the whole release major |
+
+The release takes the highest level any commit asks for. A PR check
+(`commit-convention.yml`) rejects malformed markers (e.g. `[bump:pacth]`)
+before merge, so a typo can't silently mis-version a release.
 
 | tool      | for                                                | source |
 |-----------|----------------------------------------------------|--------|
@@ -67,10 +81,43 @@ Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
 git (and the test-runner qemu) on native x86_64 and arm64 runners, re-hosts
 bpftool/veristat/lvh/esbuild/headers,
-**computes the next `vX.Y`** (highest existing + 0.1), publishes all assets to
+**computes the next semver tag** (highest existing, bumped by the level the
+commit messages ask for — minor by default), publishes all assets to
 that immutable release, and records the version + checksums into `versions.env`.
 The version bumps only when this repo changes, so consumers re-fetch only on a
 real toolchain change.
+
+### Back-patching an older line
+
+To ship a fix on an older release while `master` has moved on, branch the line
+from its tag and push fixes there:
+
+```
+git branch release/v0.6 v0.6.0 && git push origin release/v0.6
+# PR the fix into release/v0.6, then merge
+```
+
+A push to `release/*` runs the same workflow, but the version is computed from
+the highest tag **reachable on that branch** — so a fix on `release/v0.6`
+(forked at `v0.6.0`) publishes `v0.6.1`, independent of whatever `master` is on.
+On `release/*` an unmarked commit defaults to a **patch** bump (not minor), so a
+hotfix can't accidentally collide with a mainline minor tag; use `[bump:minor]`
+/`[bump:major]` to override. The branch name is convention only — `release/vX.Y`
+(the minor line) is the natural granularity since patches walk it forward.
+
+### Flavored variants
+
+A **flavor** is an opt-in variant of an existing release, tagged
+`vX.Y.Z-<flavor>` (e.g. `v0.6.0-asan`). Run the workflow manually from the
+Actions tab with the **`flavor`** input set: it pins to the latest clean
+release reachable, appends the suffix, and publishes a separate (prerelease)
+release **without bumping the version line**. Flavored tags are unordered — the
+version computation matches only clean `vX.Y[.Z]` tags, so a flavor never
+becomes a baseline or shifts mainline. Consumers stay on clean versions by
+default and opt in by pinning `TOOLCHAIN_VERSION=X.Y.Z-<flavor>`.
+
+(The suffix is a label only — producing genuinely different binaries for a
+flavor, e.g. via extra build-args, is wired up per flavor when defined.)
 
 To avoid burning an hour rebuilding clang on every push, the workflow only
 rebuilds a from-source tool when its inputs changed: a `detect` step
