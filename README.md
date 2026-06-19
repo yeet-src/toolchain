@@ -90,21 +90,23 @@ real toolchain change.
 
 ### Back-patching an older line
 
-To ship a fix on an older release while `master` has moved on, branch the line
-from its tag and push fixes there:
+Every time `master` cuts a new line (`vX.Y.0`), CI **auto-opens** the
+`release/vX.Y` maintenance branch at that commit (patches and flavor builds
+don't open a line). So to ship a fix on an older release while `master` has
+moved on, just PR it into the existing branch:
 
 ```
-git branch release/v0.6 v0.6.0 && git push origin release/v0.6
-# PR the fix into release/v0.6, then merge
+# release/v0.6 already exists (opened when v0.6.0 was cut)
+# open a PR against release/v0.6, then merge (rebase)
 ```
 
-A push to `release/*` runs the same workflow, but the version is computed from
-the highest tag **reachable on that branch** — so a fix on `release/v0.6`
-(forked at `v0.6.0`) publishes `v0.6.1`, independent of whatever `master` is on.
-On `release/*` an unmarked commit defaults to a **patch** bump (not minor), so a
-hotfix can't accidentally collide with a mainline minor tag; use `[bump:minor]`
-/`[bump:major]` to override. The branch name is convention only — `release/vX.Y`
-(the minor line) is the natural granularity since patches walk it forward.
+A push to `release/*` runs the same workflow, but the version is scoped **by
+name** to that line's tags — so a fix on `release/v0.6` publishes `v0.6.1`,
+independent of whatever `master` is on. On `release/*` an unmarked commit
+defaults to a **patch** bump (not minor), so a hotfix can't accidentally collide
+with a mainline tag; use `[bump:minor]`/`[bump:major]` to override. (If a line
+predates auto-creation, fork it manually: `git branch release/vX.Y vX.Y.0 &&
+git push origin release/vX.Y`.)
 
 ### Flavored variants
 

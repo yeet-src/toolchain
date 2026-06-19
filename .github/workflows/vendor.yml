@@ -442,3 +442,26 @@ jobs:
                  --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
+
+      - name: Open maintenance branch for a new minor/major line
+        if: steps.ver.outputs.skip != 'true' && github.ref_name == 'master'
+        run: |
+          set -euo pipefail
+          # When master cuts a NEW line (vX.Y.0), fork release/vX.Y at the same
+          # immutable commit so future back-ports have somewhere to land.
+          # Patches (vX.Y.Z, Z>0) and flavor builds (vX.Y.Z-<flavor>) don't open
+          # a line. Creating the branch is safe: the branch-creation push is
+          # ignored by the detect guard, so it won't cut a spurious release.
+          ver="${TC}"
+          case "$ver" in *-*) echo "flavor build ($ver) — no maintenance branch"; exit 0 ;; esac
+          if [ "${ver##*.}" != 0 ]; then echo "patch release ($ver) — no new line"; exit 0; fi
+          br="release/v${ver%.*}"   # release/vX.Y
+          if git ls-remote --exit-code --heads origin "$br" >/dev/null 2>&1; then
+            echo "$br already exists — leaving it"; exit 0
+          fi
+          # HEAD is the immutable lock commit the v${ver} tag points at.
+          if git push origin "HEAD:refs/heads/${br}"; then
+            echo "opened maintenance branch ${br} at $(git rev-parse --short HEAD)"
+          else
+            echo "::warning::could not open ${br} (ruleset/permissions?) — create it manually if a back-port is needed"
+          fi
