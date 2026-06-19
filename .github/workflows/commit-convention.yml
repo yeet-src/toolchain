@@ -8,6 +8,10 @@ name: commit-convention
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
+  # The merge queue fires merge_group and waits for required checks to report on
+  # it. Markers are already validated at PR time, so the job just needs to run
+  # and pass here — otherwise a required "markers" check deadlocks the queue.
+  merge_group:
 
 permissions:
   contents: read
@@ -21,6 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate [bump:*] markers
+        if: github.event_name == 'pull_request'   # merge_group: validated at PR time, just report green
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
