@@ -27,8 +27,17 @@ plain-named (`clang-x86_64`, `make-aarch64`, …); a consumer pins one version.
 | `esbuild` | bundle the JS entry                                | official static (Go) binary, re-hosted |
 | `bpf/*.h` | libbpf program headers (`<bpf/bpf_helpers.h>`, …)  | libbpf bundled with bpftool |
 
+The table above is the **build** toolchain — what `make` resolves. The same
+release also carries a static **qemu** (`qemu-x86_64.tar.gz`,
+`qemu-aarch64.tar.gz`) for the optional kernel-matrix *test* runner, which boots
+[lvh](https://github.com/cilium/little-vm-helper) kernel images. qemu is **not**
+a build tool — it needs host KVM + root, so `make` never touches it; the test
+harness fetches it on demand. Built from source like clang, then trimmed to the
+binary plus the few firmware blobs its machine loads (see
+[`build/Dockerfile.qemu`](build/Dockerfile.qemu)).
+
 ```
-build/      reproducible recipe — Dockerfile.{clang,make,git}, build-*.sh,
+build/      reproducible recipe — Dockerfile.{clang,make,git,qemu}, build-*.sh,
             fetch-*.sh, versions.env (pins + checksums)
 include/    arch-independent libbpf SDK headers (source for the headers tarball)
 embed/      the glue a template carries: toolchain.mk + fetch-toolchain.sh
@@ -51,7 +60,8 @@ from this repo's release, checksum-verified. Pull updates with
 
 Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
-git on native x86_64 and arm64 runners, re-hosts bpftool/veristat/esbuild/headers,
+git (and the test-runner qemu) on native x86_64 and arm64 runners, re-hosts
+bpftool/veristat/esbuild/headers,
 **computes the next `vX.Y`** (highest existing + 0.1), publishes all assets to
 that immutable release, and records the version + checksums into `versions.env`.
 The version bumps only when this repo changes, so consumers re-fetch only on a
@@ -60,6 +70,6 @@ real toolchain change.
 Build a single tool locally:
 
 ```sh
-build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh
+build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh / build-qemu.sh
 build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-esbuild.sh / fetch-libbpf-headers.sh
 ```
