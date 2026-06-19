@@ -281,7 +281,7 @@ jobs:
           set -euo pipefail
           # Releases are semver vMAJOR.MINOR.PATCH, one immutable release each.
           # The bump is the HIGHEST level any commit since the previous release
-          # on THIS line (latest..HEAD) asks for, via a marker in its message:
+          # on THIS line (latest..HEAD) asks for, via a marker in its SUBJECT:
           #   * [bump:major]   -> major  (X+1.0.0)
           #   * [bump:minor]   -> minor  (X.Y+1.0)
           #   * [bump:patch]   -> patch  (X.Y.Z+1)
@@ -319,7 +319,7 @@ jobs:
             pat=$(echo "$latest" | awk -F. '{print $3+0}')   # missing patch -> 0
             rank=0   # highest level seen: 1=patch 2=minor 3=major
             while IFS= read -r sha; do
-              msg="$(git log -1 --format=%B "$sha")"
+              msg="$(git log -1 --format=%s "$sha")"   # subject line only
               if   printf '%s' "$msg" | grep -qi '\[bump:major\]'; then lvl=3
               elif printf '%s' "$msg" | grep -qi '\[bump:minor\]'; then lvl=2
               elif printf '%s' "$msg" | grep -qi '\[bump:patch\]'; then lvl=1

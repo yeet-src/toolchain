@@ -18,8 +18,9 @@ release **`vMAJOR.MINOR.PATCH`** (`v0.6.0`, `v0.6.1`, …). The tag carries the
 version, so the assets are plain-named (`clang-x86_64`, `make-aarch64`, …); a
 consumer pins one version.
 
-CI picks the bump from the commit messages since the last release, via a
-`[bump:LEVEL]` marker anywhere in the message:
+CI picks the bump from the commits since the last release, via a `[bump:LEVEL]`
+marker in the commit **subject** (the body is free prose — put the marker on the
+subject line, like `[skip ci]`; for squash merges that's the PR title):
 
 | Marker | Bump | Notes |
 | --- | --- | --- |
