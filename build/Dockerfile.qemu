@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# PROOF OF CONCEPT — a fully-static, musl-linked qemu-system, cut down to just
-# what cilium's lvh drives for the kernel-matrix runner:
+# A fully-static, musl-linked qemu-system, cut down to just what cilium's lvh
+# drives for the kernel-matrix runner:
 #
 #   - one softmmu target (x86_64 or aarch64)         (-M virt / default pc)
 #   - KVM + TCG accelerators                          (-enable-kvm, tcg fallback)
