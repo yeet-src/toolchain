@@ -68,14 +68,19 @@ jobs:
           FORCE: ${{ github.event.inputs.rebuild_all }}
         run: |
           set -euo pipefail
-          # Previous published release on THIS line: the highest semver tag
-          # reachable from HEAD. On master that's the global highest; on a
-          # release/* branch it's that line's latest, so a back-patch reuses the
-          # right baseline and compares fingerprints against it. Match only
-          # clean vX.Y[.Z] tags — any suffixed tag (vX.Y.Z-<flavor>) is an
-          # unordered variant that must never serve as a baseline.
-          prev="$(git tag -l 'v[0-9]*' --merged HEAD \
-            | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | sed 's/^v//' | sort -V | tail -1)"
+          # Previous published release on THIS line. Release tags point at
+          # DETACHED lock-commits (vendor pushes only the tag, never the
+          # protected branch), so we can't select by git reachability — we
+          # select by tag NAME. On a release/vX.Y branch, restrict to that
+          # X.Y line's tags; on master (or any other ref) use all clean tags
+          # globally. Suffixed tags (vX.Y.Z-<flavor>) are unordered variants
+          # and excluded either way.
+          case "${GITHUB_REF_NAME:-}" in
+            release/v*) mm="$(printf '%s' "${GITHUB_REF_NAME#release/v}" | cut -d. -f1,2 | sed 's/[.]/\\./g')"
+                        tagpat="^v${mm}(\.[0-9]+)?$" ;;
+            *)          tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
+          esac
+          prev="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
           prevtag=""
           [ -n "$prev" ] && prevtag="v$prev"
           echo "prevtag=$prevtag" >> "$GITHUB_OUTPUT"
@@ -301,19 +306,23 @@ jobs:
           # An UNMARKED commit takes the branch default: minor on master, patch
           # on a release/* maintenance branch (where you're almost always
           # back-patching, and a minor bump could collide with a mainline tag).
-          # "latest" is the highest tag REACHABLE from HEAD, so a back-patch on
-          # release/0.6 (forked at v0.6.0) bumps the 0.6 line, not master's. The
-          # PR check (commit-convention.yml) rejects malformed markers before
-          # merge. Pre-semver tags (v0.1..v0.5) read as 0.MINOR.0; the first
-          # publish ever is v0.1.0.
+          # "latest" is the highest tag on THIS line, selected by NAME (release
+          # tags are detached lock-commits, so reachability can't be used): a
+          # release/vX.Y branch sees only its X.Y line, master sees all clean
+          # tags. So a back-patch on release/v0.6 bumps the 0.6 line, not
+          # master's. The PR check (commit-convention.yml) rejects malformed
+          # markers before merge. Pre-semver tags (v0.1..v0.5) read as 0.MINOR.0;
+          # the first publish ever is v0.1.0.
           case "${GITHUB_REF_NAME:-}" in
-            release/*) default_lvl=1 ;;   # maintenance line: unmarked -> patch
-            *)         default_lvl=2 ;;   # mainline: unmarked -> minor
+            release/v*) default_lvl=1   # maintenance line: unmarked -> patch
+                        mm="$(printf '%s' "${GITHUB_REF_NAME#release/v}" | cut -d. -f1,2 | sed 's/[.]/\\./g')"
+                        tagpat="^v${mm}(\.[0-9]+)?$" ;;
+            *)          default_lvl=2   # mainline: unmarked -> minor
+                        tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
           esac
-          # Clean vX.Y[.Z] releases only; suffixed tags (vX.Y.Z-<flavor>) are
+          # Clean tags on this line only; suffixed tags (vX.Y.Z-<flavor>) are
           # unordered variants and never advance the line.
-          latest="$(git tag -l 'v[0-9]*' --merged HEAD \
-            | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | sed 's/^v//' | sort -V | tail -1)"
+          latest="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
           flavor="${FLAVOR:-}"
           if [ -n "$flavor" ]; then
             # A flavor build is an unordered VARIANT of an existing release: it
