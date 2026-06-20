@@ -3,7 +3,7 @@ name: vendor-toolchain
 # Build and publish the static toolchain for x86_64 and aarch64: clang, make
 # and git are compiled from source on NATIVE runners per arch (no QEMU — the
 # multi-hour x86_64 LLVM build runs here in normal CI time), while bpftool,
-# esbuild and the libbpf headers are re-hosted from upstream. All are published
+# esbuild, gh and the libbpf headers are re-hosted from upstream. All are published
 # as version-addressed assets on the `toolchain` release, with checksums
 # recorded back into build/versions.env.
 #
@@ -227,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [bpftool, veristat, lvh, esbuild]
+        tool: [bpftool, veristat, lvh, esbuild, gh]
         arch:
           - { platform: amd64, name: x86_64 }
           - { platform: arm64, name: aarch64 }
@@ -269,7 +269,7 @@ jobs:
           # <tool>-<arch> holding one file, so install them all the same way.
           # qemu is the exception (a bin/+share tree), packed separately below.
           for a in x86_64 aarch64; do
-            for t in clang make git bpftool veristat lvh esbuild; do
+            for t in clang make git bpftool veristat lvh esbuild gh; do
               install -Dm755 "artifacts/${t}-${a}/${t}" "${a}/${t}"
             done
           done
@@ -382,7 +382,7 @@ jobs:
           # Record the checksum of every binary we publish, so a consumer
           # verifies the exact artifact it downloads from our release.
           for arch in x86_64 aarch64; do
-            for tool in clang make bpftool veristat lvh esbuild git; do
+            for tool in clang make bpftool veristat lvh esbuild git gh; do
               s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
               key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
               sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
@@ -431,7 +431,7 @@ jobs:
           # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
-            for t in clang make bpftool veristat lvh esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+            for t in clang make bpftool veristat lvh esbuild git gh; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
           # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
@@ -448,7 +448,7 @@ jobs:
           esac
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" $flags \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/veristat/esbuild/gh/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
 
