@@ -41,6 +41,8 @@ before merge, so a typo can't silently mis-version a release.
 | `veristat`| check `*.bpf.o` load + BPF verifier statistics     | official static release, re-hosted |
 | `esbuild` | bundle the JS entry                                | official static (Go) binary, re-hosted |
 | `gh`      | release/PR automation (CI + consumer tooling)      | official static (Go) binary, re-hosted |
+| `node`    | run JS build/tooling scripts                       | built from Node.js source, musl-static, small-icu; no native addons (static ⇒ no `dlopen`) |
+| `npm`     | install a project's JS deps                        | registry tarball re-hosted as one arch-independent `npm.tar.gz`; run via the vendored `node` through the `$(NPM)` command prefix |
 | `bpf/*.h` | libbpf program headers (`<bpf/bpf_helpers.h>`, …)  | libbpf bundled with bpftool |
 
 The table above is the **build** toolchain — what `make` resolves. The same
@@ -58,7 +60,7 @@ the test harness fetches them on demand):
   docker bootstrap.
 
 ```
-build/      reproducible recipe — Dockerfile.{clang,make,git,qemu}, build-*.sh,
+build/      reproducible recipe — Dockerfile.{clang,make,git,node,qemu}, build-*.sh,
             fetch-*.sh, versions.env (pins + checksums)
 include/    arch-independent libbpf SDK headers (source for the headers tarball)
 embed/      the glue a template carries: toolchain.mk + fetch-toolchain.sh
@@ -81,8 +83,8 @@ from this repo's release, checksum-verified. Pull updates with
 
 Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
-git (and the test-runner qemu) on native x86_64 and arm64 runners, re-hosts
-bpftool/veristat/lvh/esbuild/gh/headers,
+git/node (and the test-runner qemu) on native x86_64 and arm64 runners, re-hosts
+bpftool/veristat/lvh/esbuild/gh/npm/headers,
 **computes the next semver tag** (highest existing, bumped by the level the
 commit messages ask for — minor by default), publishes all assets to
 that immutable release, and records the version + checksums into `versions.env`.
@@ -134,6 +136,6 @@ from-source rebuild, run the workflow manually from the Actions tab with the
 Build a single tool locally:
 
 ```sh
-build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh / build-qemu.sh
-build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-lvh.sh / fetch-esbuild.sh / fetch-gh.sh / fetch-libbpf-headers.sh
+build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh / build-node.sh / build-qemu.sh
+build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-lvh.sh / fetch-esbuild.sh / fetch-gh.sh / fetch-npm.sh / fetch-libbpf-headers.sh
 ```

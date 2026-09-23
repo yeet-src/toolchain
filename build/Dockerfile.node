@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1
+#
+# Build a fully-static, musl-linked `node` from Node.js source. Nobody ships
+# one: the official Linux tarballs are glibc-dynamic, and even the unofficial
+# `linux-*-musl` builds still need /lib/ld-musl-*.so.1 at runtime (Alpine only).
+# Node's own configure has `--fully-static` for exactly this, so like clang
+# it's built here rather than re-hosted. The result is ONE self-contained ELF
+# that runs on any Linux of the matching arch regardless of the host libc.
+#
+# Trade-off of a static node: `process.dlopen` is unavailable, so native
+# `.node` addons can't load. Pure-JS packages, and packages that spawn a
+# separate binary (esbuild), work normally — that's what a build toolchain
+# needs. npm is NOT built in (--without-npm): it's pure JS and rides the
+# release as an arch-independent tarball instead (see fetch-npm.sh).
+#
+# V8 is a heavy compile: expect 1.5-3h per arch on a 4-vCPU CI runner, so
+# build it per-arch on a NATIVE runner (see build-node.sh / vendor.yml).
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f Dockerfile.node --build-arg NODE_VERSION=26.10.0 \
+#     --target export --output type=local,dest=./out .
+#
+# Extracts /node into ./out/node.
+
+ARG ALPINE_TAG=alpine:3.21
+
+FROM ${ALPINE_TAG} AS build
+ARG NODE_VERSION=26.10.0
+# Compile parallelism is memory-bound (heavy V8 translation units peak near
+# 1GB each), so default low enough for an 8GB Docker VM; CI passes nproc.
+ARG COMPILE_JOBS=4
+
+# g++/musl static libs are the link inputs; python3 drives gyp; linux-headers
+# for libuv. Every bundled dep (V8, libuv, openssl, zlib, icu, …) builds from
+# the node source tree, so nothing external is linked in.
+RUN apk add --no-cache \
+        g++ gcc make python3 linux-headers musl-dev libstdc++-dev \
+        curl tar xz binutils
+
+WORKDIR /src
+RUN curl -fSL -o node.tar.xz \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.tar.xz" \
+ && tar xf node.tar.xz \
+ && rm node.tar.xz
+
+WORKDIR /src/node-v${NODE_VERSION}
+# --fully-static:   -static link of libc, libstdc++ and every dep (musl does
+#                   this cleanly; it's what disables dlopen).
+# --with-intl=small-icu: English-only ICU data. Full ICU is ~30MB of tables a
+#                   build tool never needs; small-icu keeps Intl APIs working.
+# --without-npm:    npm ships separately (arch-independent tarball).
+RUN ./configure \
+        --fully-static \
+        --with-intl=small-icu \
+        --without-npm \
+ && make -j"${COMPILE_JOBS}"
+
+# Strip, and prove the binary is both fully static and able to run a script
+# end to end — including the pieces a build script leans on (fs,
+# child_process, ESM, Intl) — before we let it out of the build stage. Kept
+# as its own layer so a check tweak never re-runs the compile above.
+RUN set -eux; \
+    cp out/Release/node /node; \
+    strip /node; \
+    /node --version; \
+    if readelf -l /node | grep -q INTERP; then echo "ERROR: node is not static"; exit 1; fi; \
+    echo "confirmed: no PT_INTERP -> fully static"; \
+    printf '%s\n' \
+      'import { readFileSync } from "node:fs";' \
+      'import { execFileSync } from "node:child_process";' \
+      'const lic = readFileSync("LICENSE", "utf8").length > 0 ? "lic" : "nolic";' \
+      'const echo = execFileSync("/bin/echo", ["ok"]).toString().trim();' \
+      'console.log(process.version, lic, echo, new Intl.NumberFormat("en").format(1234));' \
+      > /tmp/t.mjs; \
+    out="$(/node /tmp/t.mjs)"; echo "smoke: $out"; \
+    [ "$out" = "v${NODE_VERSION} lic ok 1,234" ]; \
+    echo "confirmed: node runs standalone"
+
+# Minimal stage holding only the binary, for `--output type=local`.
+FROM scratch AS export
+COPY --from=build /node /node

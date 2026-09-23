@@ -81,6 +81,7 @@ fetch_bin veristat
 fetch_bin esbuild
 fetch_bin git
 fetch_bin gh
+fetch_bin node
 
 # libbpf program headers: arch-independent, one copy per version, beside the
 # per-arch tool dirs ($key/include/bpf/*.h).
@@ -92,6 +93,22 @@ if want headers && [ ! -e "$INC/bpf/bpf_helpers.h" ]; then
 	verify "$td/h.tgz" "${LIBBPF_HEADERS_SHA256:-}" "libbpf-headers" || { rm -rf "$td"; exit 1; }
 	mkdir -p "$INC"
 	tar xzf "$td/h.tgz" -C "$INC"   # tarball holds a top-level bpf/ dir
+	rm -rf "$td"
+fi
+
+# npm: arch-independent pure JS, one copy per version beside the per-arch tool
+# dirs ($key/npm/bin/npm-cli.js), run with the vendored node (toolchain.mk's
+# $(NPM)). Extracted to a temp dir and renamed into place so a half-unpacked
+# tree is never mistaken for a complete one.
+NPMDIR="$(dirname "$DIR")/npm"
+if want npm && [ ! -e "$NPMDIR/bin/npm-cli.js" ]; then
+	echo ">> fetch npm (v${TOOLCHAIN_VERSION})"
+	td="$(mktemp -d)"
+	curl -fSL --retry 3 -o "$td/npm.tgz" "${REL}/npm.tar.gz"
+	verify "$td/npm.tgz" "${NPM_SHA256:-}" "npm" || { rm -rf "$td"; exit 1; }
+	tar xzf "$td/npm.tgz" -C "$td"   # tarball holds a top-level npm/ dir
+	rm -rf "$NPMDIR"
+	mv "$td/npm" "$NPMDIR"
 	rm -rf "$td"
 fi
 

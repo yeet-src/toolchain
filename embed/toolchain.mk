@@ -1,6 +1,7 @@
-# Resolve the static build toolchain (clang, bpftool, veristat, esbuild, git, gh) — included
-# by the project Makefile before build/bpf.mk, so the tools are set before any
-# rule uses them. A `make CLANG=…` CLI override beats this.
+# Resolve the static build toolchain (clang, bpftool, veristat, esbuild, git,
+# gh, node, npm) — included by the project Makefile before build/bpf.mk, so the
+# tools are set before any rule uses them. A `make CLANG=…` CLI override beats
+# this.
 #
 # Tools come from a shared, per-machine cache keyed by the project's pinned
 # toolchain version (build/toolchain.lock). `make toolchain` fills it,
@@ -11,8 +12,8 @@
 # Falls back to host tools on PATH when no lock is present.
 #
 # The vendored binaries are Linux musl-static, so the cache is only used on
-# Linux. On any other host (macOS, BSD) we leave CLANG/BPFTOOL/ESBUILD/GIT/GH
-# unset, falling through to host tools on PATH — macOS is an edit-here,
+# Linux. On any other host (macOS, BSD) we leave CLANG/BPFTOOL/ESBUILD/GIT/GH/
+# NODE/NPM unset, falling through to host tools on PATH — macOS is an edit-here,
 # build-on-Linux host for BPF work.
 
 UNAME_S := $(shell uname -s)
@@ -37,9 +38,19 @@ ifneq ($(TOOLCHAIN_LOCK),)
   ESBUILD  ?= $(TOOLCHAIN_DIR)/esbuild
   GIT      ?= $(TOOLCHAIN_DIR)/git
   GH       ?= $(TOOLCHAIN_DIR)/gh
+  NODE     ?= $(TOOLCHAIN_DIR)/node
   # libbpf program headers are arch-independent: one copy per version key,
   # beside the per-arch tool dirs.
   BPF_SYSINCLUDE ?= $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/include
+  # npm is arch-independent pure JS, unpacked beside the per-arch dirs like the
+  # headers. Its shebang is `#!/usr/bin/env node`, which would miss the vendored
+  # node (it's in the cache, not on PATH), so NPM is "node + the CLI entry",
+  # not a bare path. It also puts the cache dir on PATH: npm does NOT add
+  # node's own dir for lifecycle scripts, so without this `npm run x` (script
+  # calls `node`), `#!/usr/bin/env node` shebangs in node_modules/.bin, and
+  # postinstalls like esbuild's `node install.js` all fail with "node: not
+  # found". Use it as a command prefix — `$(NPM) install` — never as a file.
+  NPM      ?= PATH="$(TOOLCHAIN_DIR):$$PATH" $(NODE) $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/npm/bin/npm-cli.js
 endif
 
 # PATH fallbacks (bpf.mk supplies the clang/bpftool fallbacks).
@@ -47,6 +58,8 @@ VERISTAT ?= veristat
 ESBUILD  ?= esbuild
 GIT      ?= git
 GH       ?= gh
+NODE     ?= node
+NPM      ?= npm
 
 # Fill the cache for this arch, downloading any missing tool once. A no-op
 # when no lock is present (PATH case).
