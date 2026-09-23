@@ -1,13 +1,13 @@
 name: vendor-toolchain
 
-# Build and publish the static toolchain for x86_64 and aarch64: clang, make
-# and git are compiled from source on NATIVE runners per arch (no QEMU — the
-# multi-hour x86_64 LLVM build runs here in normal CI time), while bpftool,
-# esbuild, gh and the libbpf headers are re-hosted from upstream. All are published
-# as version-addressed assets on the `toolchain` release, with checksums
-# recorded back into build/versions.env.
+# Build and publish the static toolchain for x86_64 and aarch64: clang, make,
+# git and node are compiled from source on NATIVE runners per arch (no QEMU —
+# the multi-hour x86_64 LLVM and V8 builds run here in normal CI time), while
+# bpftool, esbuild, gh, npm and the libbpf headers are re-hosted from upstream.
+# All are published as version-addressed assets on the `toolchain` release,
+# with checksums recorded back into build/versions.env.
 #
-# To avoid burning an hour rebuilding clang on every change, the `detect` job
+# To avoid burning hours rebuilding clang/node on every change, the `detect` job
 # fingerprints each from-source tool's build inputs (its Dockerfile + the
 # version vars it consumes) against the previous release: a tool only rebuilds
 # when its inputs changed, otherwise its binary is reused from that release.
@@ -58,6 +58,7 @@ jobs:
       clang: ${{ steps.scan.outputs.clang }}
       make: ${{ steps.scan.outputs.make }}
       git: ${{ steps.scan.outputs.git }}
+      node: ${{ steps.scan.outputs.node }}
       qemu: ${{ steps.scan.outputs.qemu }}
       prevtag: ${{ steps.scan.outputs.prevtag }}
     steps:
@@ -116,6 +117,7 @@ jobs:
               clang) df=build/Dockerfile.clang; keys="LLVM_VERSION ALPINE_TAG" ;;
               make)  df=build/Dockerfile.make;  keys="MAKE_VERSION ALPINE_TAG" ;;
               git)   df=build/Dockerfile.git;   keys="GIT_VERSION ALPINE_TAG" ;;
+              node)  df=build/Dockerfile.node;  keys="NODE_VERSION ALPINE_TAG" ;;
               qemu)  df=build/Dockerfile.qemu;  keys="QEMU_VERSION LIBSLIRP_VERSION ALPINE_TAG" ;;
             esac
             env="$(read_src "$1" build/versions.env)"
@@ -126,7 +128,7 @@ jobs:
 
           # A tool builds when forced, when there's no prior release to reuse
           # from, or when its fingerprint differs from that release.
-          for tool in clang make git qemu; do
+          for tool in clang make git node qemu; do
             if [ "${FORCE:-false}" = true ] || [ -z "$prevtag" ] \
                || [ "$(fingerprint WORK "$tool")" != "$(fingerprint "$prevtag" "$tool")" ]; then
               echo "$tool=true"  >> "$GITHUB_OUTPUT"; echo "build  $tool"
@@ -138,13 +140,13 @@ jobs:
   build:
     needs: detect
     # One job per (tool, arch) so every tool builds on its own runner in
-    # parallel — the multi-hour clang build no longer blocks make/git/qemu, and
-    # each job is labelled for the tool it actually builds (e.g. "clang
-    # (x86_64)"). Wall-clock collapses from clang+make+git+qemu to ~max(tool).
+    # parallel — the multi-hour clang and node builds don't block make/git/qemu,
+    # and each job is labelled for the tool it actually builds (e.g. "clang
+    # (x86_64)"). Wall-clock collapses from the sum of tools to ~max(tool).
     strategy:
       fail-fast: false
       matrix:
-        tool: [clang, make, git, qemu]
+        tool: [clang, make, git, node, qemu]
         arch:
           - { platform: amd64, name: x86_64, runner: ubuntu-latest }
           - { platform: arm64, name: aarch64, runner: ubuntu-24.04-arm }
@@ -162,8 +164,8 @@ jobs:
         run: |
           set -euo pipefail
           . build/versions.env
-          # Per-tool build-args. clang/make/git export a single static binary at
-          # out/<tool>; qemu exports a tree (out/bin + out/share/qemu) — a static
+          # Per-tool build-args. clang/make/git/node export a single static
+          # binary at out/<tool>; qemu exports a tree (out/bin + out/share/qemu) — a static
           # qemu-system for the optional kernel-matrix runner, trimmed by its
           # Dockerfile to the binary + the firmware blobs lvh's machine loads.
           case "$TOOL" in
@@ -177,6 +179,10 @@ jobs:
             git)   args=(-f build/Dockerfile.git
                      --build-arg "GIT_VERSION=${GIT_VERSION}"
                      --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+            node)  args=(-f build/Dockerfile.node
+                     --build-arg "NODE_VERSION=${NODE_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}"
+                     --build-arg "COMPILE_JOBS=$(nproc)") ;;
             qemu)  args=(-f build/Dockerfile.qemu
                      --build-arg "QEMU_VERSION=${QEMU_VERSION}"
                      --build-arg "QEMU_TARGET=${ARCH}-softmmu"
@@ -209,7 +215,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          # Single binary for clang/make/git; the bin/+share tree for qemu.
+          # Single binary for clang/make/git/node; the bin/+share tree for qemu.
           # download-artifact restores this as artifacts/<tool>-<arch>/...,
           # which is exactly what the vendor job assembles from.
           name: ${{ matrix.tool }}-${{ matrix.arch.name }}
@@ -264,19 +270,23 @@ jobs:
       - name: Assemble toolchain tree
         run: |
           set -euo pipefail
-          # Every single-binary tool — from-source (clang/make/git) and
-          # re-hosted (bpftool/veristat/lvh/esbuild) — arrives as the artifact
-          # <tool>-<arch> holding one file, so install them all the same way.
-          # qemu is the exception (a bin/+share tree), packed separately below.
+          # Every single-binary tool — from-source (clang/make/git/node) and
+          # re-hosted (bpftool/veristat/lvh/esbuild/gh) — arrives as the
+          # artifact <tool>-<arch> holding one file, so install them all the
+          # same way. qemu is the exception (a bin/+share tree), packed
+          # separately below.
           for a in x86_64 aarch64; do
-            for t in clang make git bpftool veristat lvh esbuild gh; do
+            for t in clang make git node bpftool veristat lvh esbuild gh; do
               install -Dm755 "artifacts/${t}-${a}/${t}" "${a}/${t}"
             done
           done
           # libbpf headers stay inline: arch-independent, and vendor commits
           # include/ into the version tag below, so they must land in the tree.
           sh build/fetch-libbpf-headers.sh
-          ls -la x86_64 aarch64 include/bpf
+          # npm is arch-independent pure JS too (not baked into node); fetched
+          # inline here and tarred below, never committed.
+          sh build/fetch-npm.sh
+          ls -la x86_64 aarch64 include/bpf npm
           file x86_64/* aarch64/* || true
 
       - name: Build libbpf-headers tarball
@@ -284,6 +294,13 @@ jobs:
           set -euo pipefail
           # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
           tar -czf libbpf-headers.tar.gz -C include bpf
+
+      - name: Build npm tarball
+        run: |
+          set -euo pipefail
+          # Top-level npm/ dir so a consumer extracts it as <key>/npm/bin/npm-cli.js
+          # and runs it with the vendored node (its shebang wants `node` on PATH).
+          tar -czf npm.tar.gz npm
 
       - name: Build qemu tarballs
         run: |
@@ -382,7 +399,7 @@ jobs:
           # Record the checksum of every binary we publish, so a consumer
           # verifies the exact artifact it downloads from our release.
           for arch in x86_64 aarch64; do
-            for tool in clang make bpftool veristat lvh esbuild git gh; do
+            for tool in clang make bpftool veristat lvh esbuild git gh node; do
               s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
               key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
               sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
@@ -390,12 +407,15 @@ jobs:
           done
           hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
+          # npm ships as one arch-independent tarball, so checksum the tarball.
+          nsum="$(sha256sum npm.tar.gz | awk '{print $1}')"
+          sed -i "s|^NPM_SHA256=.*|NPM_SHA256=${nsum}|" build/versions.env
           # qemu ships as a per-arch tarball (binary + blobs), so checksum the tarball.
           for arch in x86_64 aarch64; do
             qs="$(sha256sum "qemu-$arch.tar.gz" | awk '{print $1}')"
             sed -i "s|^QEMU_SHA256_${arch}=.*|QEMU_SHA256_${arch}=${qs}|" build/versions.env
           done
-          grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
+          grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=|^NPM_SHA256=' build/versions.env
 
       - name: Tag immutable v${{ env.TC }} snapshot
         if: steps.ver.outputs.skip != 'true'
@@ -431,9 +451,10 @@ jobs:
           # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
-            for t in clang make bpftool veristat lvh esbuild git gh; do cp "$a/$t" "dist/${t}-${a}"; done
+            for t in clang make bpftool veristat lvh esbuild git gh node; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
+          cp npm.tar.gz dist/npm.tar.gz
           # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
           for a in x86_64 aarch64; do cp "qemu-$a.tar.gz" "dist/qemu-$a.tar.gz"; done
           # Pick the "Latest" flag explicitly (GitHub's default is recency-based,
@@ -448,7 +469,7 @@ jobs:
           esac
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" $flags \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/veristat/esbuild/gh/libbpf headers re-hosted; qemu for the kernel-matrix runner."
+                 --notes "Static build toolchain $tag — clang/make/git/node built from source; bpftool/veristat/esbuild/gh/npm/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
 
